@@ -62,14 +62,34 @@ static int nodups_specs(struct saved_data *data)
 					    curr_spec->property_key)) {
 				if (strcmp(spec_arr[jj].lr.ctx_raw,
 						    curr_spec->lr.ctx_raw)) {
-					rc = -1;
-					errno = EINVAL;
+					if(strcmp(spec_arr[jj].lr.ctx_raw, "u:object_r:hal_ipacm_hwservice:s0") == 0) {
+						free(spec_arr[jj].lr.ctx_raw);
+						spec_arr[jj].lr.ctx_raw = strdup("u:object_r:hal_tetheroffload_hwservice:s0");
+						continue;
+					}
+					if(strcmp(curr_spec->lr.ctx_raw, "u:object_r:hal_ipacm_hwservice:s0") == 0) {
+						free(curr_spec->lr.ctx_raw);
+						curr_spec->lr.ctx_raw = strdup("u:object_r:hal_tetheroffload_hwservice:s0");
+						continue;
+					}
 					selinux_log
 						(SELINUX_ERROR,
 						 "Multiple different specifications for %s  (%s and %s).\n",
 						 curr_spec->property_key,
 						 spec_arr[jj].lr.ctx_raw,
 						 curr_spec->lr.ctx_raw);
+					int ignore = 0;
+					/*
+					 * This issue has been found on Moto E5
+					 * E SELinux : Multiple different specifications for rcs  (u:object_r:radio_service:s0 and u:object_r:mot_rcs_service:s0).
+					 */
+					if(!strcmp(curr_spec->property_key, "rcs"))
+						ignore = 1;
+
+					if(!ignore) {
+						rc = -1;
+						errno = EINVAL;
+					}
 				} else {
 					selinux_log
 						(SELINUX_WARNING,

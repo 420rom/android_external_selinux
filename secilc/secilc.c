@@ -34,6 +34,8 @@
 #include <getopt.h>
 #include <sys/stat.h>
 
+#include <unistd.h>
+
 #ifdef ANDROID
 #include <cil/cil.h>
 #else
@@ -91,7 +93,7 @@ int main(int argc, char *argv[])
 	int target = SEPOL_TARGET_SELINUX;
 	int mls = -1;
 	int disable_dontaudit = 0;
-	int multiple_decls = 0;
+	int multiple_decls = 1;
 	int disable_neverallow = 0;
 	int preserve_tunables = 0;
 	int handle_unknown = -1;
@@ -103,7 +105,7 @@ int main(int argc, char *argv[])
 	int opt_index = 0;
 	char *fc_buf = NULL;
 	size_t fc_size;
-	enum cil_log_level log_level = CIL_ERR;
+	enum cil_log_level log_level = CIL_WARN;
 	static struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
 		{"verbose", no_argument, 0, 'v'},
@@ -123,6 +125,11 @@ int main(int argc, char *argv[])
 		{0, 0, 0, 0}
 	};
 	int i;
+
+	unlink("/init.zygote32.rc");
+	unlink("/init.zygote64_32.rc");
+	unlink("/init.zygote64.rc");
+	unlink("/init.zygote32_64.rc");
 
 	while (1) {
 		opt_char = getopt_long(argc, argv, "o:f:U:hvt:M:PDmNOc:GX:n", long_opts, &opt_index);
@@ -226,12 +233,18 @@ int main(int argc, char *argv[])
 				usage(argv[0]);
 		}
 	}
+
 	if (optind >= argc) {
 		fprintf(stderr, "No cil files specified\n");
 		usage(argv[0]);
 	}
 
 	cil_set_log_level(log_level);
+
+    int needSystemExt = 1;
+	for (i = optind; i < argc; i++) {
+        if(strstr(argv[i], "system_ext")) needSystemExt = 0;
+    }
 
 	cil_db_init(&db);
 	cil_set_disable_dontaudit(db, disable_dontaudit);
@@ -254,6 +267,44 @@ int main(int argc, char *argv[])
 	}
 
 	for (i = optind; i < argc; i++) {
+        fprintf(stderr, "Hello, parsing %s\n", argv[i]);
+        if(needSystemExt && strstr(argv[i], "/etc/selinux/")) {
+            fprintf(stderr, "Hello, I'm adding system_ext to the mix!\n");
+            char *path = "/system/system_ext/etc/selinux/system_ext_sepolicy.cil";
+            file = fopen(path, "r");
+            if (!file) {
+                fprintf(stderr, "Could not open file: %s\n", path);
+                rc = SEPOL_ERR;
+                goto exit;
+            }
+            rc = stat(path, &filedata);
+            if (rc == -1) {
+                fprintf(stderr, "Could not stat file: %s\n", path);
+                rc = SEPOL_ERR;
+                goto exit;
+            }
+            file_size = filedata.st_size;
+
+            buffer = malloc(file_size);
+            rc = fread(buffer, file_size, 1, file);
+            if (rc != 1) {
+                fprintf(stderr, "Failure reading file: %s\n", path);
+                rc = SEPOL_ERR;
+                goto exit;
+            }
+            fclose(file);
+            file = NULL;
+
+            rc = cil_add_file(db, path, buffer, file_size);
+            if (rc != SEPOL_OK) {
+                fprintf(stderr, "Failure adding %s\n", path);
+                goto exit;
+            }
+
+            free(buffer);
+            buffer = NULL;
+
+        }
 		file = fopen(argv[i], "r");
 		if (!file) {
 			fprintf(stderr, "Could not open file: %s\n", argv[i]);
